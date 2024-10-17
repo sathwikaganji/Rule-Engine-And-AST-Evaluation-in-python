@@ -1,0 +1,141 @@
+import re
+import json
+
+# Node class to represent each AST node (operator or operand)
+class Node:
+    def _init_(self, node_type, left=None, right=None, value=None):
+        self.type = node_type  # "operator" or "operand"
+        self.left = left  # Left child node (for operators)
+        self.right = right  # Right child node (for operators)
+        self.value = value  # Condition or operator value
+
+    def _repr_(self):
+        return json.dumps(self._dict_, indent=4)
+
+# Function to create a rule AST from a string representation
+def create_rule(rule_string):
+    def parse_condition(condition):
+        # Parse individual conditions like "age > 30", "department = 'Sales'"
+        match = re.match(r'(\w+)\s*(>|<|=)\s*([\w\'\s]+)', condition.strip())
+        if match:
+            attr, operator, value = match.groups()
+            return Node("operand", value=(attr.strip(), operator.strip(), value.strip()))
+        raise ValueError(f"Invalid condition: {condition}")
+    
+    def build_ast(expression):
+        expression = expression.strip()
+        
+        # Handling parentheses first
+        if expression.startswith("(") and expression.endswith(")"):
+            return build_ast(expression[1:-1])
+        
+        # Operators precedence
+        if ' AND ' in expression:
+            left_expr, right_expr = expression.split(' AND ', 1)
+            return Node("operator", left=build_ast(left_expr), right=build_ast(right_expr), value='AND')
+        elif ' OR ' in expression:
+            left_expr, right_expr = expression.split(' OR ', 1)
+            return Node("operator", left=build_ast(left_expr), right=build_ast(right_expr), value='OR')
+        else:
+            return parse_condition(expression)
+    
+    return build_ast(rule_string)
+
+# Function to combine multiple rule ASTs into one (using AND by default)
+def combine_rules(rule_strings):
+    asts = [create_rule(rule) for rule in rule_strings]
+    
+    if not asts:
+        return None
+
+    # Combine all ASTs using "AND" logic
+    combined_ast = asts[0]
+    
+    for ast in asts[1:]:
+        combined_ast = Node("operator", left=combined_ast, right=ast, value="AND")
+    
+    return combined_ast
+
+# Function to evaluate a rule AST against a user's data
+def evaluate_rule(ast, data):
+    if ast.type == "operand":
+        attr, operator, value = ast.value
+        actual_value = data.get(attr)
+
+        # Convert string conditions to appropriate types
+        if isinstance(actual_value, str):
+            value = value.strip("'")
+
+        # Evaluation logic for operators
+        if operator == '>':
+            return actual_value > int(value)
+        elif operator == '<':
+            return actual_value < int(value)
+        elif operator == '=':
+            return actual_value == value
+        else:
+            raise ValueError(f"Invalid operator: {operator}")
+
+    elif ast.type == "operator":
+        left_eval = evaluate_rule(ast.left, data)
+        right_eval = evaluate_rule(ast.right, data)
+        
+        if ast.value == "AND":
+            return left_eval and right_eval
+        elif ast.value == "OR":
+            return left_eval or right_eval
+        else:
+            raise ValueError(f"Invalid operator: {ast.value}")
+    
+    return False
+
+# Error handling and validation for rule strings
+def validate_rule_string(rule_string):
+    # Basic validation for missing operators or invalid formatting
+    if not re.search(r'\band\b|\bor\b|>|<|=', rule_string, re.IGNORECASE):
+        raise ValueError(f"Invalid rule format: {rule_string}")
+
+# Test Cases
+
+# Creating individual rules and verifying AST
+rule1 = "((age > 30 AND department = 'Sales') OR (age < 25 AND department = 'Marketing')) AND (salary > 50000 OR experience > 5)"
+rule2 = "((age > 30 AND department = 'Marketing')) AND (salary > 20000 OR experience > 5)"
+
+# Create rule AST
+try:
+    rule_ast1 = create_rule(rule1)
+    rule_ast2 = create_rule(rule2)
+    print("Rule 1 AST:")
+    print(rule_ast1)
+    print("Rule 2 AST:")
+    print(rule_ast2)
+except ValueError as e:
+    print(f"Error creating rule: {e}")
+
+# Combine the rules
+combined_ast = combine_rules([rule1, rule2])
+print("\nCombined Rule AST:")
+print(combined_ast)
+
+# Evaluating rules with sample JSON data
+user_data = {
+    "age": 35,
+    "department": "Sales",
+    "salary": 60000,
+    "experience": 3
+}
+
+try:
+    result = evaluate_rule(combined_ast, user_data)
+    print("\nEvaluation Result for user_data:")
+    print(result)  # Should return True or False based on evaluation
+except ValueError as e:
+    print(f"Error evaluating rule: {e}")
+
+# Example of error handling with invalid rule
+invalid_rule = "age 30"  # Invalid rule
+try:
+    validate_rule_string(invalid_rule)
+    invalid_ast = create_rule(invalid_rule)
+except ValueError as e:
+    print(f"\nInvalid Rule Error: {e}")
